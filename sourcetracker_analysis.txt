@@ -1,0 +1,912 @@
+##########################################################################################################
+# Heather Deel
+# October 5th, 2020
+# Sourcetracker 2 analysis with summer/spring SHSU PMI sources and summer/spring bone data
+# Use qiime version 2-2020.6 for all analysis (except for what was done in QIITA, which is still qiime1)
+##########################################################################################################
+
+########################################################
+# Get spring and summer source data from QIITA
+########################################################
+
+# deblur reference hit biom tables (150 trimmed) downloaded for spring and summer
+
+# for spring, just one file in QIITA study 11271 - 16S prep ID 4633
+
+# for summer, several different files - QIITA study 11489, the reference hit biom file from prep 5211 (includes everything). Do NOT download anything from any of the other preps - they are messed up
+
+# downloaded bone biom file from qiita study 11553
+
+# from all of the same tabs, for all data, also download reference-hit.seqs.fa - these are equivalent to the rep-seqs files, and will be used for making the new tree
+
+# all reference hit biom files and reference hit seqs files stored here: /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/raw_files
+
+
+########################################################
+# Import all raw files as qiime2 artifacts and merge
+########################################################
+
+# import biom files 
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/raw_files
+
+source activate qiime2-2020.6
+
+qiime tools import \
+> --input-path reference-hit_bone.biom \
+> --type 'FeatureTable[Frequency]' \
+> --input-format BIOMV210Format \
+> --output-path feature-table_bone.qza
+
+qiime tools import \
+> --input-path reference-hit_spring.biom \
+> --type 'FeatureTable[Frequency]' \
+> --input-format BIOMV210Format \
+> --output-path feature-table_spring.qza
+
+qiime tools import \
+> --input-path reference-hit_SFW.biom \
+> --type 'FeatureTable[Frequency]' \
+> --input-format BIOMV210Format \
+> --output-path feature-table_SFW.qza
+
+# visualize all of the biom files to check
+
+qiime feature-table summarize \
+> --i-table feature-table_bone.qza \
+> --o-visualization feature-table_bone.qzv
+
+qiime feature-table summarize \
+> --i-table feature-table_spring.qza \
+> --o-visualization feature-table_spring.qzv
+
+qiime feature-table summarize \
+> --i-table feature-table_SFW.qza \
+> --o-visualization feature-table_SFW.qzv
+
+# everything has the qiita ID on the sample name, everything seems to have sequences (as opposed to md5 hashes) as the feature
+# SFW file has all of the summer bodies
+
+# import all of the reference-hit files into rep-seqs
+
+qiime tools import \
+> --input-path reference-hit_bone.seqs.fa \
+> --type 'FeatureData[Sequence]' \
+> --output-path rep-seqs_bone.qza
+
+qiime tools import \
+> --input-path reference-hit_spring.seqs.fa \
+> --type 'FeatureData[Sequence]' \
+> --output-path rep-seqs_spring.qza
+
+qiime tools import \
+> --input-path reference-hit_SFW.seqs.fa \
+> --type 'FeatureData[Sequence]' \
+> --output-path rep-seqs_SFW.qza
+
+# visualize all rep-seqs files to make sure in the same format
+
+qiime feature-table tabulate-seqs \
+> --i-data rep-seqs_bone.qza \
+> --o-visualization rep-seqs_bone.qzv
+
+qiime feature-table tabulate-seqs \
+> --i-data rep-seqs_spring.qza \
+> --o-visualization rep-seqs_spring.qzv
+
+qiime feature-table tabulate-seqs \
+> --i-data rep-seqs_SFW.qza \
+> --o-visualization rep-seqs_SFW.qzv
+
+# everything is 150 bp long and has the same rep-seqs file format (no md5 hash for the feature ID in any of the rep-seqs files)
+
+# merge feature tables and visualize
+
+qiime feature-table merge \
+> --i-tables feature-table_bone.qza \
+> --i-tables feature-table_SFW.qza \
+> --i-tables feature-table_spring.qza \
+> --o-merged-table feature-table_bone_SFWall_spring.qza
+
+qiime feature-table summarize \
+> --i-table feature-table_bone_SFWall_spring.qza \
+> --o-visualization feature-table_bone_SFWall_spring.qzv
+
+# bone, SHSU spring, SHSU summer all there
+
+# merge rep-seqs files and visualize
+
+qiime feature-table merge-seqs \
+> --i-data rep-seqs_bone.qza \
+> --i-data rep-seqs_SFW.qza \
+> --i-data rep-seqs_spring.qza \
+> --o-merged-data rep-seqs_bone_SFWall_spring.qza
+
+qiime feature-table tabulate-seqs \
+> --i-data rep-seqs_bone_SFWall_spring.qza \
+> --o-visualization rep-seqs_bone_SFWall_spring.qzv
+
+
+###############################################
+# Make fragment insertion tree in summit
+###############################################
+
+# must use all PMI and bone since there is no way to filter rep-seqs files
+
+# use the reference database provided in the Parkinson's mouse tutorial
+
+# log into summit
+
+cd /scratch/summit/hdeel@colostate.edu/sourcetracker
+
+mkdir sepp_tree
+
+cd sepp_tree
+
+wget \
+  -O "sepp-refs-gg-13-8.qza" \
+  "https://data.qiime2.org/2020.6/common/sepp-refs-gg-13-8.qza"
+
+# use FileZilla to transfer over rep-seqs, located in dropbox in /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/raw_files/rep-seqs_bone_SFWall_spring.qza
+
+############################# job begin ######################################
+#!/bin/sh
+#SBATCH --job-name=ST_sepp_tree
+#SBATCH --partition=smem
+#SBATCH --nodes=2
+#SBATCH --ntasks=48
+#SBATCH --time=168:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=hdeel@colostate.edu
+
+# Make python work
+export LC_ALL=en_US.utf-8
+export LANG=en_US.utf-8
+
+# Activate qiime2
+source activate qiime2-2020.6
+
+# sepp tree command
+qiime fragment-insertion sepp \
+--i-representative-sequences rep-seqs_bone_SFWall_spring.qza \
+--i-reference-database sepp-refs-gg-13-8.qza \
+--p-threads 48 \
+--o-tree bone_SFWall_spring_insertion-tree.qza \
+--o-placements bone_SFWall_spring_insertion-placements.qza
+#################################### job end ############################################
+
+sbatch sepp_tree.sh
+
+###############################################
+# Taxonomy
+###############################################
+
+# again must use all PMI and bone since there is no way to filter rep-seqs files
+
+### classify taxonomy
+
+# log into summit 
+
+cd /scratch/summit/hdeel@colostate.edu/sourcetracker/taxonomy
+
+# get the classifier
+wget \
+  -O "gg-13-8-99-515-806-nb-classifier.qza" \
+  "https://data.qiime2.org/2020.6/common/gg-13-8-99-515-806-nb-classifier.qza"
+
+# use FileZilla to transfer over rep-seqs, located in dropbox in /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/raw_files/rep-seqs_bone_SFWall_spring.qza
+
+######################### job begin ###################################
+#!/bin/sh
+#SBATCH --job-name=ST_taxonomy
+#SBATCH --partition=ssky
+#SBATCH --nodes=2
+#SBATCH --ntasks=48
+#SBATCH --time=24:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=hdeel@colostate.edu
+
+# Make python work
+export LC_ALL=en_US.utf-8
+export LANG=en_US.utf-8
+
+# Activate qiime2
+source activate qiime2-2020.6
+
+# taxonomy classification command
+qiime feature-classifier classify-sklearn \
+--i-reads rep-seqs_bone_SFWall_spring.qza \
+--i-classifier gg-13-8-99-515-806-nb-classifier.qza \
+--p-n-jobs 48 \
+--o-classification bone_SFWall_spring_taxonomy.qza  
+########################## job end #########################################
+
+sbatch taxonomy.sh
+
+# transfer files from FileZilla to dropbox
+
+# look at taxonomy
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis 
+
+source activate qiime2-2020.6
+
+qiime metadata tabulate \
+> --m-input-file taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --o-visualization taxonomy/bone_SFWall_spring_taxonomy.qzv
+
+###################################################
+# Feature table filtering
+###################################################
+
+# figure out which metadata file to use - update with QIITA IDs if necessary
+
+# filter mitochondria and chloroplast from big PMI table
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis
+
+source activate qiime2-2020.6
+
+qiime taxa filter-table \
+> --i-table tables/feature-table_bone_SFWall_spring.qza \
+> --i-taxonomy taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --p-exclude mitochondria,chloroplast \
+> --o-filtered-table tables/feature-table_noChloMito_bone_SFWall_spring.qza
+
+qiime feature-table summarize \
+> --i-table tables/feature-table_noChloMito_bone_SFWall_spring.qza \
+> --o-visualization tables/feature-table_noChloMito_bone_SFWall_spring.qzv
+
+# assess which samples should be included in ST analysis
+# all bone samples except 11553.SHSU.STAFS2016.007.R11, 11553.SHSU.STAFS2016.011.L09, 11553.STAFS.2016.064.L12
+# all day 1 and day 2 skin.hip and skin.face samples
+# all day 1 and day 2 soil.hip, and soil.face samples
+# note that the decision to keep all day 2 samples is due to Pechal et al. which states the decomposer community does not form until 48 hrs after decomposition
+# all soil.ctrl samples - not sure why yet, but it seems right
+# all day 19, 20, 21 samples of skin.hip, skin.face, soil.hip, and soil.face samples = decomposer community
+
+# filter feature table down to these samples
+
+qiime feature-table filter-samples \
+> --i-table tables/feature-table_noChloMito_bone_SFWall_spring.qza \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --p-where "[sourcetracker_include]='y'" \
+> --o-filtered-table tables/feature-table_noChloMito_STsamplesonly.qza
+
+# visualize table and check filtering
+
+qiime feature-table summarize \
+> --i-table tables/feature-table_noChloMito_STsamplesonly.qza \
+> --o-visualization tables/feature-table_noChloMito_STsamplesonly.qzv
+
+# all bodies from spring and summer seasons, in both PMI project and bone, are there
+
+# make table for all ST soil only (including all 21 days of cadaver soils and soil ctrls, no skin)
+
+qiime feature-table filter-samples \
+> --i-table tables/feature-table_noChloMito_bone_SFWall_spring.qza \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --p-where "[sample_type]='soil'" \
+> --o-filtered-table tables/feature-table_noChloMito_allSTsoilonly.qza
+
+qiime feature-table summarize \
+> --i-table tables/feature-table_noChloMito_allSTsoilonly.qza \
+> --o-visualization tables/feature-table_noChloMito_allSTsoilonly.qzv
+
+# includes soil.hip, soil.face, soil.ctrl, and all days from all
+
+###############################################
+# Core metrics
+###############################################
+
+### core metrics with all data including bone
+
+# choose sampling depth from final feature table in previous step
+# for now, choose 4548
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis
+
+source activate qiime2-2020.6
+
+qiime diversity core-metrics-phylogenetic \
+> --i-phylogeny tree/bone_SFWall_spring_insertion-tree.qza \
+> --i-table tables/feature-table_noChloMito_STsamplesonly.qza \
+> --p-sampling-depth 4548 \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --output-dir core_metrics/core-metrics-STsamplesonly-4548
+
+cd core_metrics/core-metrics-STsamplesonly-4548/
+
+qiime diversity alpha-group-significance \
+> --i-alpha-diversity faith_pd_vector.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --o-visualization faith-pd-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+> --i-alpha-diversity evenness_vector.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --o-visualization evenness-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+> --i-alpha-diversity shannon_vector.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --o-visualization shannon-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+> --i-alpha-diversity observed_features_vector.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --o-visualization observed-features-group-significance.qzv
+
+# beta group significance
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix unweighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column sample_type_timepoint \
+> --o-visualization unweighted-unifrac-sample-type-timepoint-significance.qzv \
+> --p-pairwise
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix weighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column sample_type_timepoint \
+> --o-visualization weighted-unifrac-sample-type-timepoint-significance.qzv \
+> --p-pairwise
+
+### core metrics with just skin and soil data
+
+# first filter feature table
+
+cd ..
+cd ..
+
+qiime feature-table filter-samples \
+> --i-table tables/feature-table_noChloMito_STsamplesonly.qza \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --p-where "[rib]='no'" \
+> --o-filtered-table tables/feature-table_noChloMito_STsourcesonly.qza
+
+qiime feature-table summarize \
+> --i-table tables/feature-table_noChloMito_STsourcesonly.qza \
+> --o-visualization tables/feature-table_noChloMito_STsourcesonly.qzv
+
+# there is no bone in this
+
+#use same depth for core metrics as above
+
+qiime diversity core-metrics-phylogenetic \
+> --i-phylogeny tree/bone_SFWall_spring_insertion-tree.qza \
+> --i-table tables/feature-table_noChloMito_STsourcesonly.qza \
+> --p-sampling-depth 4548 \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --output-dir core_metrics/core-metrics-STsourcesonly-4548
+
+cd core_metrics/core-metrics-STsourcesonly-4548/
+
+qiime diversity alpha-group-significance \
+> --i-alpha-diversity observed_features_vector.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --o-visualization observed-features-group-significance.qzv
+
+### now do with just soil ctrl samples
+
+qiime feature-table filter-samples \
+> --i-table tables/feature-table_noChloMito_STsamplesonly.qza \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --p-where "[soil_control]='yes'" \
+> --o-filtered-table tables/feature-table_noChloMito_soilctrlonly.qza
+
+qiime feature-table summarize \
+> --i-table tables/feature-table_noChloMito_soilctrlonly.qza \
+> --o-visualization tables/feature-table_noChloMito_soilctrlonly.qzv
+
+# table has only soil control as it's supposed to 
+
+qiime diversity core-metrics-phylogenetic \
+> --i-phylogeny tree/bone_SFWall_spring_insertion-tree.qza \
+> --i-table tables/feature-table_noChloMito_soilctrlonly.qza \
+> --p-sampling-depth 4548 \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --output-dir core_metrics/core-metrics-soilctrlonly-4548
+
+cd core_metrics/core-metrics-soilctrlonly-4548/
+
+qiime diversity alpha-group-significance \
+> --i-alpha-diversity observed_features_vector.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --o-visualization observed-features-group-significance.qzv
+
+# beta group significance of soil controls 
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix unweighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --o-visualization unweighted-unifrac-season-significance.qzv
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix weighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --o-visualization weighted-unifrac-season-significance.qzv
+
+# core metrics within each season
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/tables 
+
+qiime feature-table filter-samples \
+> --i-table feature-table_noChloMito_STsamplesonly.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --p-where "[season]='spring'" \
+> --o-filtered-table feature-table_noChloMito_STsamplesonly_spring.qza
+
+qiime feature-table summarize \
+> --i-table feature-table_noChloMito_STsamplesonly_spring.qza \
+> --o-visualization feature-table_noChloMito_STsamplesonly_spring.qzv
+
+# spring looks good
+
+qiime feature-table filter-samples \
+> --i-table feature-table_noChloMito_STsamplesonly.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --p-where "[season]='summer'" \
+> --o-filtered-table feature-table_noChloMito_STsamplesonly_summer.qza
+
+qiime feature-table summarize \
+> --i-table feature-table_noChloMito_STsamplesonly_summer.qza \
+> --o-visualization feature-table_noChloMito_STsamplesonly_summer.qzv
+
+# summer looks good
+
+qiime diversity core-metrics-phylogenetic \
+> --i-phylogeny tree/bone_SFWall_spring_insertion-tree.qza \
+> --i-table tables/feature-table_noChloMito_STsamplesonly_spring.qza \
+> --p-sampling-depth 4548 \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --output-dir core_metrics/core-metrics-STsamplesonly-spring-4548
+
+qiime diversity core-metrics-phylogenetic \
+> --i-phylogeny tree/bone_SFWall_spring_insertion-tree.qza \
+> --i-table tables/feature-table_noChloMito_STsamplesonly_summer.qza \
+> --p-sampling-depth 4548 \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --output-dir core_metrics/core-metrics-STsamplesonly-summer-4548
+
+# beta group significance of sample type timepoints within the spring and summer
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/core_metrics/core-metrics-STsamplesonly-spring-4548 
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix unweighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column sample_type_timepoint \
+> --o-visualization unweighted-unifrac-sample-type-timepoint-significance-spring.qzv \
+> --p-pairwise
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix weighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column sample_type_timepoint \
+> --o-visualization weighted-unifrac-sample-type-timepoint-significance-spring.qzv \
+> --p-pairwise
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/core_metrics/core-metrics-STsamplesonly-summer-4548 
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix unweighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column sample_type_timepoint \
+> --o-visualization unweighted-unifrac-sample-type-timepoint-significance-summer.qzv \
+> --p-pairwise
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix weighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column sample_type_timepoint \
+> --o-visualization weighted-unifrac-sample-type-timepoint-significance-summer.qzv \
+> --p-pairwise
+
+
+# use these rarefied tables for input into ST
+
+# core metrics with just soils (control and cadaver, from all days, spring and summer together)
+qiime diversity core-metrics-phylogenetic \
+> --i-phylogeny tree/bone_SFWall_spring_insertion-tree.qza \
+> --i-table tables/feature-table_noChloMito_allSTsoilonly.qza \
+> --p-sampling-depth 4548 \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --output-dir core_metrics/core-metrics-allSTsoilonly-4548
+
+###############################################
+# Make taxa bar plots
+###############################################
+
+# use rarefied tables from core metrics
+
+# taxa marplot of all ST samples
+
+qiime taxa barplot \
+> --i-table core_metrics/core-metrics-STsamplesonly-4548/rarefied_table.qza \
+> --i-taxonomy taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --o-visualization taxonomy/taxa-bar-plot-STsamplesonly-4548.qzv
+
+# taxa barplot of all ST sources only
+
+qiime taxa barplot \
+> --i-table core_metrics/core-metrics-STsourcesonly-4548/rarefied_table.qza \
+> --i-taxonomy taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --o-visualization taxonomy/taxa-bar-plot-STsourcesonly-4548.qzv
+
+# taxa barplot of soil controls only
+
+qiime taxa barplot \
+> --i-table core_metrics/core-metrics-soilctrlonly-4548/rarefied_table.qza \
+> --i-taxonomy taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --m-metadata-file ../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --o-visualization taxonomy/taxa-bar-plot-soilctrlonly-4548.qzv
+
+###############################################
+# Sourcetracker
+###############################################
+
+# use these mapping files for sourcetracker:
+/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/mapping_files/map_sourcetracker_day1_2_19_20_21_spring.txt
+
+/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/mapping_files/map_sourcetracker_day1_2_19_20_21_summer.txt
+
+# export rarefied feature tables as biom files for use in ST
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/core_metrics
+
+qiime tools export \
+> --input-path core-metrics-STsamplesonly-spring-4548/rarefied_table.qza \
+> --output-path core-metrics-STsamplesonly-spring-4548/exported-feature-table
+
+qiime tools export \
+> --input-path core-metrics-STsamplesonly-summer-4548/rarefied_table.qza \
+> --output-path core-metrics-STsamplesonly-summer-4548/exported-feature-table
+
+# rename tables as follows:
+
+rarefied_table_spring.biom
+rarefied_table_summer.biom
+
+# use FileZilla to move biom tables and mapping files onto Summit
+
+############## spring job begin ######################
+#!/bin/sh
+#SBATCH --job-name=sourcetracker_day1_2_19_20_21_spring
+#SBATCH --partition=ssky
+#SBATCH --nodes=1
+#SBATCH --ntasks=24
+#SBATCH --time=24:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=hdeel@colostate.edu
+
+# Make python work
+export LC_ALL=en_US.utf-8
+export LANG=en_US.utf-8
+
+# Activate sourcetracker
+source activate st2
+
+# Sourcetracker command
+sourcetracker2 gibbs \
+-i rarefied_table_spring.biom \
+-m map_sourcetracker_day1_2_19_20_21_spring.txt \
+--source_rarefaction_depth 0 \
+--sink_rarefaction_depth 0 \
+-o STout_day1_2_19_20_21_spring \
+--jobs 24
+############## spring job end #########################
+
+
+################ summer job begin ########################
+#!/bin/sh
+#SBATCH --job-name=sourcetracker_day1_2_19_20_21_summer
+#SBATCH --partition=ssky
+#SBATCH --nodes=1
+#SBATCH --ntasks=24
+#SBATCH --time=24:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=hdeel@colostate.edu
+
+# Make python work
+export LC_ALL=en_US.utf-8
+export LANG=en_US.utf-8
+
+# Activate sourcetracker
+source activate st2
+
+# Sourcetracker command
+sourcetracker2 gibbs \
+-i rarefied_table_summer.biom \
+-m map_sourcetracker_day1_2_19_20_21_summer.txt \
+--source_rarefaction_depth 0 \
+--sink_rarefaction_depth 0 \
+-o STout_day1_2_19_20_21_summer \
+--jobs 24
+################# summer job end ############################
+
+
+######################################################
+# November 21st, 2020
+# Heather Deel
+# Ancom analysis of soil controls between seasons
+######################################################
+
+# notes: do NOT use a rarefied table - ANCOM does its own normalization
+
+# filter out samples with fewer features than the rarefaction threshold
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/ancom 
+
+source activate qiime2-2020.6
+
+qiime feature-table filter-samples \
+> --i-table ../tables/feature-table_noChloMito_soilctrlonly.qza \
+> --p-min-frequency 4548 \
+> --o-filtered-table feature-table_noChloMito_soilctrlonly_4548min_ancom.qza
+
+qiime feature-table summarize \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom.qza \
+> --o-visualization feature-table_noChloMito_soilctrlonly_4548min_ancom.qzv
+
+# table looks good
+
+### ANCOM at the ASV level
+
+# filter out low prevalent ASVs
+
+qiime feature-table filter-features \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table feature-table_noChloMito_soilctrlonly_4548min_ancom_filtfeat.qza
+
+# add pseudo count
+
+qiime composition add-pseudocount \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_filtfeat.qza \
+> --o-composition-table feature-table_noChloMito_soilctrlonly_4548min_ancom_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_filtfeat_comp.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_soilctrl_ASV_season.qzv
+
+### ANCOM at level 3
+
+qiime taxa collapse \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom.qza \
+> --i-taxonomy ../taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --o-collapsed-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L3.qza \
+> --p-level 3
+
+# filter low prevalent taxa
+
+qiime feature-table filter-features \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L3.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L3_filtfeat.qza
+
+# add pseudo count
+
+qiime composition add-pseudocount \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L3_filtfeat.qza \
+> --o-composition-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L3_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L3_filtfeat_comp.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_soilctrl_L3_season.qzv
+
+### ANCOM at level 6
+
+qiime taxa collapse \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom.qza \
+> --i-taxonomy ../taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --o-collapsed-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L6.qza \
+> --p-level 6
+
+# filter low prevalent taxa
+
+qiime feature-table filter-features \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L6.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L6_filtfeat.qza
+
+# add pseudo count
+
+qiime composition add-pseudocount \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L6_filtfeat.qza \
+> --o-composition-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L6_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L6_filtfeat_comp.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_soilctrl_L6_season.qzv
+
+
+### ANCOM at level 2
+
+qiime taxa collapse \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom.qza \
+> --i-taxonomy ../taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --o-collapsed-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L2.qza \
+> --p-level 2
+
+# filter low prevalent taxa
+
+qiime feature-table filter-features \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L2.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L2_filtfeat.qza
+
+# add pseudo count
+
+qiime composition add-pseudocount \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L2_filtfeat.qza \
+> --o-composition-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L2_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L2_filtfeat_comp.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_soilctrl_L2_season.qzv
+
+### ANCOM at level 7
+
+qiime taxa collapse \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom.qza \
+> --i-taxonomy ../taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --o-collapsed-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L7.qza \
+> --p-level 7
+
+# filter low prevalent taxa
+
+qiime feature-table filter-features \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L7.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L7_filtfeat.qza
+
+# add pseudo count
+
+qiime composition add-pseudocount \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L7_filtfeat.qza \
+> --o-composition-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L7_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L7_filtfeat_comp.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_soilctrl_L7_season.qzv
+
+### ANCOM at level 4
+
+qiime taxa collapse \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom.qza \
+> --i-taxonomy ../taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --o-collapsed-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L4.qza \
+> --p-level 4
+
+# filter low prevalent taxa
+
+qiime feature-table filter-features \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L4.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L4_filtfeat.qza
+
+# add pseudo count
+
+qiime composition add-pseudocount \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L4_filtfeat.qza \
+> --o-composition-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L4_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L4_filtfeat_comp.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_soilctrl_L4_season.qzv
+
+
+### ANCOM at level 5
+
+qiime taxa collapse \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom.qza \
+> --i-taxonomy ../taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --o-collapsed-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L5.qza \
+> --p-level 5
+
+# filter low prevalent taxa
+
+qiime feature-table filter-features \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L5.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L5_filtfeat.qza
+
+# add pseudo count
+
+qiime composition add-pseudocount \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L5_filtfeat.qza \
+> --o-composition-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L5_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table feature-table_noChloMito_soilctrlonly_4548min_ancom_L5_filtfeat_comp.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_soilctrl_L5_season.qzv
+
+#################################################################################
+# Heather Deel
+# November 30th, 2020
+# Using the deicode plugin on soil control data
+# As a sanity check to pair with ancom, and see if the features are the same
+# And get PCoA with directional arrows with differentially abundant features
+#################################################################################
+
+source activate qiime2-2020.6
+
+conda install -c conda-forge deicode
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/deicode 
+
+# commands were guided by the plugin tutorial here: https://library.qiime2.org/plugins/deicode/19/
+
+# note that I will not use a rarefied table nor will I use deicode on a taxonomically collapsed table
+
+# I copied /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/tables/feature-table_noChloMito_soilctrlonly.qza into the deicode folder for easier access
+
+qiime deicode rpca \
+> --i-table feature-table_noChloMito_soilctrlonly.qza \
+> --p-min-feature-count 10 \
+> --p-min-sample-count 500 \
+> --o-biplot ordination_soilctrl.qza \
+> --o-distance-matrix distance_soilctrl.qza
+
+qiime emperor biplot \
+> --i-biplot ordination_soilctrl.qza \
+> --m-sample-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-feature-metadata-file ../taxonomy/bone_SFWall_spring_taxonomy.qza \
+> --o-visualization biplot_soilctrl.qzv \
+> --p-number-of-features 8
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix distance_soilctrl.qza \
+> --m-metadata-file ../../mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs.txt \
+> --m-metadata-column season \
+> --p-method permanova \
+> --o-visualization season_soilctrl_significance.qzv
+
+
+
+
+
+
+
+
