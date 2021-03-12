@@ -1,0 +1,1037 @@
+##########################################################################
+# March 14th, 2018
+# 18S bone spring and summer analysis in QIIME2 (version 2019.1)
+# Heather Deel
+### NOTE that this is for the ORIGINAL Hiseq 18S run (plate NIJ_18S_13-17_52)
+#########################################################################
+
+##############################################################
+# Import sequences and quality control
+##############################################################
+
+### download files M_NIJ_2_S2_L002_I1_001.fastq.gz  M_NIJ_2_S2_L002_R1_001.fastq.gz from QIITA and transfer to summit
+
+### import sequences
+
+cd /scratch/summit/hdeel@colostate.edu/qiime2_analysis/18S_bone_Mar2019
+
+mkdir 01_raw_data
+
+cd 01_raw_data
+
+#imported data in 01_raw_data
+
+cp M_NIJ_2_S2_L002_I1_001.fastq.gz barcodes.fastq.gz
+
+cp M_NIJ_2_S2_L002_R1_001.fastq.gz sequences.fastq.gz
+
+mv barcodes.fastq.gz ..
+
+mv sequences.fastq.gz ..
+
+cd ..
+
+mkdir emp-single-end-sequences
+
+mv barcodes.fastq.gz emp-single-end-sequences/
+
+mv sequences.fastq.gz emp-single-end-sequences/
+
+source activate qiime2-2019.1
+
+qiime tools import \
+> --type EMPSingleEndSequences \
+> --input-path emp-single-end-sequences/ \
+> --output-path emp-single-end-sequences.qza
+
+###################################################################
+# Demultiplex
+###################################################################
+
+#NOTE: for demultiplexing 18S in qiita, use the "golay 12 reverse complement mapping file barcodes" option
+#NOTE: for demultiplexing 18S just in qiime2, include the "--p-rev-comp-mapping-barcodes" parameter
+
+# transfer 18S mapping file onto summit (map_18S.txt) - downloaded mapping file from QIITA and added columns for ADD_0 and season.
+
+qiime demux emp-single \
+> --i-seqs emp-single-end-sequences.qza \
+> --m-barcodes-file map_18S.txt \
+> --m-barcodes-column BarcodeSequence \
+> --p-rev-comp-mapping-barcodes \
+> --o-per-sample-sequences demux.qza
+
+qiime demux summarize \
+> --i-data demux.qza \
+> --o-visualization demux.qzv
+
+#NOTE: demux was mixed - many extraction blanks had high sequence counts, and many samples had low ones. After some troubleshooting, demux was redone using the original plate 52 18S data (downloaded from QIITA (Metcalf_NIJ_13-17_52_S1_L001_I1_001.fastq.gz and Metcalf_NIJ_13-17_52_S1_L001_R1_001.fastq.gz).
+
+# Prep template location: /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/02_metadata/bone_18S_52_original_run_prep_ribonly.txt
+
+### redemux (on local laptop, took a few hours)
+qiime demux emp-single \
+> --i-seqs emp-single-end-sequences.qza \
+> --m-barcodes-file /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/02_metadata/bone_18S_52_original_run_prep_ribonly.txt \
+> --m-barcodes-column BARCODE \
+> --p-rev-comp-mapping-barcodes \
+> --o-per-sample-sequences 18S_orig_plate52_ribonly_demux.qza
+
+qiime demux summarize \
+> --i-data 18S_orig_plate52_ribonly_demux.qza \
+> --o-visualization 18S_orig_plate52_ribonly_demux.qzv
+
+#NOTE: mapping file was updated with the original plate 52 barcodes, still called "map_18S.txt"
+
+#######################################################################
+# Denoising
+######################################################################
+
+#NOTE: need a silva reference database: downloaded Silva_132_release from https://www.arb-silva.de/download/archive/qiime and used SILVA_132_QIIME_release/rep_set/rep_set_18S_only/99/silva_132_99_18S.fna as the source
+
+## first transfer file to summit, then import reference silva seqs as a qiime2 artifact 
+
+source activate qiime2-2019.1
+
+qiime tools import \
+> --input-path silva_132_99_18S.fna \
+> --output-path silva_132_99_18S.qza \
+> --type 'FeatureData[Sequence]'
+
+# submit job on summit
+
+############# job script begin #######################
+
+#!/bin/sh
+#SBATCH --job-name=18S_bone_denoise
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --time=12:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --partition=smem
+
+#Activate qiime
+source activate qiime2-2019.1
+
+#quality-filter
+qiime quality-filter q-score \
+--i-demux 18S_orig_plate52_ribonly_demux.qza \
+--o-filtered-sequences 18S_plate52_ribonly_demux_filtered.qza \
+--o-filter-stats 18S_plate52_ribonly_demux_filter-stats.qza
+
+#denoise/deblur
+qiime deblur denoise-other \
+--i-demultiplexed-seqs 18S_plate52_ribonly_demux_filtered.qza \
+--i-reference-seqs silva_132_99_18S.qza \
+--p-trim-length 150 \
+--o-representative-sequences 18S_plate52_ribonly_rep-seqs.qza \
+--o-table 18S_plate52_ribonly_table.qza \
+--p-sample-stats \
+--o-stats 18S_plate52_ribonly_deblur-stats.qza
+
+################### job script end #############################
+
+######################################################################
+# Feature table and rep-seqs summaries
+######################################################################
+
+# using the NEW map_18S.txt with updated barcodes:
+
+source activate qiime2-2019.1
+
+qiime feature-table summarize \
+> --i-table 18S_plate52_ribonly_table.qza \
+> --o-visualization 18S_plate52_ribonly_table.qzv \
+> --m-sample-metadata-file ../03_metadata/map_18S.txt 
+
+qiime feature-table tabulate-seqs \
+> --i-data 18S_plate52_ribonly_rep-seqs.qza \
+> --o-visualization 18S_plate52_ribonly_rep-seqs.qzv
+
+# transferred files to dropbox (location: /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/01_qiime2_analysis) via filezilla:
+
+18S_plate52_ribonly_table.qza
+18S_plate52_ribonly_table.qzv
+18S_plate52_ribonly_rep-seqs.qza
+18S_plate52_ribonly_rep-seqs.qzv
+
+#######################################################################
+# Taxonomy (with the PRETRAINED classifier)
+#######################################################################
+
+#in summit
+# use the full length, pre-trained silva classifier (for now, will train my own classifier later)
+
+cd /scratch/summit/hdeel@colostate.edu/qiime2_analysis/18S_bone_Mar2019
+
+mkdir 06_taxonomy
+
+cd 06_taxonomy
+
+wget https://data.qiime2.org/2019.1/common/silva-132-99-nb-classifier.qza
+
+cd ../05_demux_deblur
+
+cp 18S_plate52_ribonly_rep-seqs.qza ../06_taxonomy/
+
+cd ../06_taxonomy
+
+### classify - submit as job
+
+nano 18S_bone_taxonomy_pretrained.txt
+
+################## job script begin ######################
+
+#!/bin/sh
+#SBATCH --job-name=18S_bone_tax_pretrained
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --time=24:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --partition=smem
+
+#Activate qiime
+source activate qiime2-2019.1
+
+#classify
+qiime feature-classifier classify-sklearn \
+--i-classifier silva-132-99-nb-classifier.qza \
+--i-reads 18S_plate52_ribonly_rep-seqs.qza \
+--o-classification 18S_plate52_ribonly_taxonomy.qza
+
+#metadata tabulate
+qiime metadata tabulate \
+--m-input-file 18S_plate52_ribonly_taxonomy.qza \
+--o-visualization 18S_plate52_ribonly_taxonomy.qzv
+
+######################### job script end ##########################
+
+### filter taxonomy (will need to filter better later - there is an issue with the pretrained classifier because taxa names skip keywords used for filtering)
+
+source activate qiime2-2019.1
+
+cd ../05_demux_deblur
+
+cp 18S_plate52_ribonly_table.qza ../06_taxonomy/
+
+cd ../06_taxonomy/
+
+qiime taxa filter-table \
+> --i-table 18S_plate52_ribonly_table.qza \
+> --i-taxonomy 18S_plate52_ribonly_taxonomy.qza \
+> --p-exclude Archaeplastida,Arthropoda,Chordata,Mollusca,Unassigned \
+> --o-filtered-table 18S_plate52_ribonly_table_taxfiltered.qza
+
+qiime feature-table summarize \
+> --i-table 18S_plate52_ribonly_table_taxfiltered.qza \
+> --o-visualization 18S_plate52_ribonly_table_taxfiltered.qzv \
+> --m-sample-metadata-file ../03_metadata/map_18S.txt 
+
+### taxa bar plots
+
+qiime taxa barplot \
+> --i-table 18S_plate52_ribonly_table_taxfiltered.qza \
+> --i-taxonomy 18S_plate52_ribonly_taxonomy.qza \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --o-visualization 18S_plate52_ribonly_taxfiltered_barplots.qzv
+
+
+#################################################################################
+# Taxonomy
+# Uses the classifier made using methods in spring18S-classifier-training.txt
+#################################################################################
+
+# in summit
+
+# moved all taxonomy files using the pre-trained classifier into new directory:
+/scratch/summit/hdeel@colostate.edu/qiime2_analysis/18S_bone_Mar2019/06_taxonomy/pretrained_silva_class
+
+
+####### job script begin ###########################
+
+#!/bin/sh
+#SBATCH --job-name=18S_bone_tax_full_silva
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --time=48:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --partition=smem
+
+#Activate qiime
+source activate qiime2-2019.1
+
+#classify
+qiime feature-classifier classify-sklearn \
+--i-classifier full-silva-18S-99-classifier.qza \
+--i-reads 18S_plate52_ribonly_rep-seqs.qza \
+--o-classification 18S_plate52_ribonly_full-taxonomy.qza
+
+#metadata tabulate
+qiime metadata tabulate \
+--m-input-file 18S_plate52_ribonly_full-taxonomy.qza \
+--o-visualization 18S_plate52_ribonly_full-taxonomy.qzv
+
+######### job script end #################
+
+### filter taxonomy 
+
+source activate qiime2-2019.1
+
+qiime taxa filter-table \
+> --i-table 18S_plate52_ribonly_table.qza \
+> --i-taxonomy 18S_plate52_ribonly_full-taxonomy.qza \
+> --p-exclude Archaeplastida,Arthropoda,Chordata,Mollusca,Unassigned,Bacteria \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered.qza
+
+qiime feature-table summarize \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered.qza \
+> --o-visualization 18S_plate52_ribonly_table_full_taxfiltered.qzv \
+> --m-sample-metadata-file ../03_metadata/map_18S.txt
+
+qiime taxa barplot \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered.qza \
+> --i-taxonomy 18S_plate52_ribonly_full-taxonomy.qza \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --o-visualization 18S_plate52_ribonly_full_taxfiltered_barplots.qzv
+
+############################################################################
+# Generate a tree
+############################################################################
+
+# will make a fasttree - sepp only works for 16S
+
+cd /scratch/summit/hdeel@colostate.edu/qiime2_analysis/18S_bone_Mar2019
+
+mkdir 07_tree_core-metrics
+
+cp 05_demux_deblur/18S_plate52_ribonly_rep-seqs.qza 07_tree_core-metrics/
+
+cd 07_tree_core-metrics/
+
+nano 18S_bone_fasttree.txt
+
+############### job script begin ###################
+
+#!/bin/sh
+#SBATCH --job-name=18S_bone_fasttree      
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --time=24:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --partition=smem
+
+#Activate qiime
+source activate qiime2-2019.1
+
+#fasttree
+qiime phylogeny	align-to-tree-mafft-fasttree \
+--i-sequences 18S_plate52_ribonly_rep-seqs.qza \
+--o-alignment 18S_plate52_ribonly_aligned-rep-seqs.qza \
+--o-masked-alignment 18S_plate52_ribonly_masked-aligned-rep-seqs.qza \
+--o-tree 18S_plate52_ribonly_unrooted-tree.qza \
+--o-rooted-tree	18S_plate52_ribonly_rooted-tree.qza
+
+############# job script end ##################
+
+####################################################################################
+# Core metrics analysis (alpha and beta diversity)
+####################################################################################
+
+mv core-metrics-results core-metrics-results_pretrained-silva
+
+### moved all files created using pretrained silva classifier into directory:
+/scratch/summit/hdeel@colostate.edu/qiime2_analysis/18S_bone_Mar2019/07_tree_core-metrics/pretrained_silva
+
+### alpha rarefaction plot to help choose sampling depth
+
+cd /scratch/summit/hdeel@colostate.edu/qiime2_analysis/18S_bone_Mar2019/07_tree_core-metrics
+
+cp ../06_taxonomy/18S_plate52_ribonly_table_full_taxfiltered.qza .
+
+qiime diversity alpha-rarefaction \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered.qza \
+> --i-phylogeny 18S_plate52_ribonly_rooted-tree.qza \
+> --p-max-depth 500000 \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --o-visualization 18S_plate52_ribonly_full_taxfiltered_alpha-rarefaction.qzv
+
+# chosen sampling depth: 	214,940 - retains 38 samples. Lost samples are:
+
+024.L10
+067.R12
+065.L11
+067.L11.march
+007.L09
+065.L09
+065.L10
+064.R09
+007.R10
+011.L09
+
+# note that body 065 lost 3 samples, 067 lost 2 samples, 007 lost 2 samples, and all other bodies lost 1
+
+# core metrics
+
+qiime diversity core-metrics-phylogenetic \
+> --i-phylogeny 18S_plate52_ribonly_rooted-tree.qza \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered.qza \
+> --p-sampling-depth 214940 \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --output-dir core-metrics-results
+
+qiime feature-table summarize \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --o-visualization 18S_plate52_ribonly_table_full_taxfiltered_214940.qzv \
+> --m-sample-metadata-file ../../02_metadata/map_18S.txt 
+
+# within map_18S.txt, make column "host_subject_id" to explore diversity between bodies
+
+# transfer new map_18S.txt onto summit (keep same name)
+
+### alpha diversity 
+qiime diversity alpha-group-significance \
+> --i-alpha-diversity core-metrics-results/faith_pd_vector.qza \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --o-visualization core-metrics-results/faith-pd-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+> --i-alpha-diversity core-metrics-results/evenness_vector.qza \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --o-visualization core-metrics-results/evenness-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+> --i-alpha-diversity core-metrics-results/shannon_vector.qza \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --o-visualization core-metrics-results/shannon-vector.qzv
+
+### beta diversity
+qiime diversity beta-group-significance \
+> --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization core-metrics-results/unweighted-unifrac-season-significance.qzv \
+> --p-pairwise
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --m-metadata-column host_subject_id \
+> --o-visualization core-metrics-results/unweighted-unifrac-host-significance.qzv \
+> --p-pairwise
+
+## Feb. 3rd 2020 - more beta group significance to determine changes between seasons, done using qiime2-2019.10
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis/05_core_metrics/core-metrics-results 
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix bray_curtis_distance_matrix.qza \
+> --m-metadata-file ../../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization bray-curtis-season-significance.qzv
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix jaccard_distance_matrix.qza \
+> --m-metadata-file ../../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization jaccard-season-significance.qzv
+
+qiime diversity beta-group-significance \
+> --i-distance-matrix weighted_unifrac_distance_matrix.qza \
+> --m-metadata-file ../../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization weighted-unifrac-season-significance.qzv
+
+## end extra beta group significance with qiime2-2019.10
+
+qiime emperor plot \
+> --i-pcoa core-metrics-results/unweighted_unifrac_pcoa_results.qza \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --p-custom-axes ADD_0 \
+> --o-visualization core-metrics-results/unweighted-unifrac-emperor-ADD_0.qzv
+
+qiime emperor plot \
+> --i-pcoa core-metrics-results/bray_curtis_pcoa_results.qza \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --p-custom-axes ADD_0 \
+> --o-visualization core-metrics-results/bray-curtis-emperor-ADD_0.qzv
+
+############ March 27th, 2020 ################
+
+# rerun core-metrics with mapping file that has host_subject_ID in it
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis 
+
+source activate qiime2-2019.1
+
+qiime diversity core-metrics-phylogenetic \
+> --i-phylogeny 18S_plate52_ribonly_rooted-tree.qza \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered.qza \
+> --p-sampling-depth 214940 \
+> --m-metadata-file ../03_metadata/map_18S.txt \
+> --output-dir core-metrics-results
+
+######################################################################
+# Make a new taxa plot using the rarefied table
+######################################################################
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis 
+
+qiime taxa barplot \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --m-metadata-file ../02_metadata/map_18S.txt \
+> --o-visualization 02_taxonomy/18S_plate52_ribonly_full_taxfiltered_214940_barplots.qzv
+
+####################################################################
+# May 18th, 2020
+# Collapsing 18S features tables to taxa levels for modeling
+# Then converting to biom
+# Version 2020.2 - a much newer version, but won't change anything
+####################################################################
+
+source activate qiime2-2020.2
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis 
+
+mkdir 03_feature_tables/collapsed_tables
+
+# remember that there are 15 levels in this one
+
+# 15
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 15 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L15.qza
+
+# 14
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 14 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L14.qza
+
+# 13
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 13 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L13.qza
+
+# 12
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 12 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L12.qza
+
+# 11
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 11 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L11.qza
+
+# 10
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 10 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L10.qza
+
+# 9
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 9 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L9.qza
+
+# 8
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 8 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L8.qza
+
+# 7
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 7 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L7.qza
+
+# 6
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 6 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L6.qza
+
+# 5
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 5 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L5.qza
+
+# 4
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 4 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L4.qza
+
+# 3
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 3 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L3.qza
+
+# 2
+qiime taxa collapse \
+> --i-table 03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --i-taxonomy 02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --p-level 2 \
+> --o-collapsed-table 03_feature_tables/collapsed_tables/18S_plate52_ribonly_table_full_taxfiltered_214940_L2.qza
+
+### now export everything as a biom file 
+
+cd 03_feature_tables/collapsed_tables/
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L2.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L2.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L3.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L3.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L4.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L4.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L5.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L5.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L6.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L6.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L7.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L7.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L8.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L8.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L9.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L9.biom
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L10.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L10.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L11.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L11.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L12.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L12.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L13.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L13.biom
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L14.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L14.biom
+
+qiime tools export \
+> --input-path 18S_plate52_ribonly_table_full_taxfiltered_214940_L15.qza \
+> --output-path exported_bioms/18S_plate52_ribonly_table_full_taxfiltered_214940_L15.biom
+
+
+# then fix all the folders. These tables are what to import into jupyter notebook for modeling at each level. 
+
+# note that these features tables appear to be one off on the collapsed level
+# however the database must start at base 0 instead of 1 - this was confirmed with qzv summaries
+
+######################################################################
+# Heather Deel
+# November 20th, 2020
+# ANCOM for statistical analysis
+# Do between seasons and hosts in 18S
+######################################################################
+
+# do not use rarefied table - ANCOM does its own normalization
+
+# filter out samples with fewer features than the rarefaction threshold 
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis/07_ancom
+
+source activate qiime2-2020.6
+
+qiime feature-table filter-samples \
+> --i-table ../03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered.qza \
+> --p-min-frequency 214940 \
+> --o-filtered-table ../03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza
+
+qiime feature-table summarize \
+> --i-table ../03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza \
+> --o-visualization ../03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qzv
+
+# table looks good
+
+### ANCOM as the ASV level
+
+# filter out low prevalent ASVs
+
+qiime feature-table filter-features \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_filtfeat.qza
+
+# add pseudo count 
+
+qiime composition add-pseudocount \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_filtfeat.qza \
+> --o-composition-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_18S_ASV_season.qzv
+
+# ancom between hosts
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column host \
+> --o-visualization ancom_18S_ASV_host.qzv
+
+### ANCOM at level 7
+
+# collapse table to level 7 (to match taxa plot in supp materials)
+
+qiime taxa collapse \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza \
+> --i-taxonomy ../02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --o-collapsed-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L7.qza
+> --p-level 7
+
+# filter low prevalent level 7 taxa
+
+qiime feature-table filter-features \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L7.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L7_filtfeat.qza
+
+# add pseudo count 
+
+qiime composition add-pseudocount \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L7_filtfeat.qza \
+> --o-composition-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L7_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L7_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_18S_L7_season.qzv
+
+# ancom between hosts
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L7_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column host \
+> --o-visualization ancom_18S_L7_host.qzv
+
+### ANCOM at level 2
+
+# collapse table to level 2 (to match taxa plot in supp materials)
+
+qiime taxa collapse \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza \
+> --i-taxonomy ../02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --o-collapsed-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L2.qza \
+> --p-level 2
+
+# filter low prevalent level 2 taxa
+
+qiime feature-table filter-features \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L2.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L2_filtfeat.qza
+
+# add pseudo count 
+
+qiime composition add-pseudocount \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L2_filtfeat.qza \
+> --o-composition-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L2_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L2_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_18S_L2_season.qzv
+
+# ancom between hosts
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L2_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column host \
+> --o-visualization ancom_18S_L2_host.qzv
+
+### ANCOM at level 3
+
+# collapse table to level 2 (to match taxa plot in supp materials)
+
+qiime taxa collapse \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza \
+> --i-taxonomy ../02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --o-collapsed-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L3.qza \
+> --p-level 3
+
+# filter low prevalent level 3 taxa
+
+qiime feature-table filter-features \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L3.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L3_filtfeat.qza
+
+# add pseudo count 
+
+qiime composition add-pseudocount \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L3_filtfeat.qza \
+> --o-composition-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L3_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L3_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_18S_L3_season.qzv
+
+# ancom between hosts
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L3_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column host \
+> --o-visualization ancom_18S_L3_host.qzv
+
+### ANCOM at level 4
+
+# collapse table to level 4
+
+qiime taxa collapse \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza \
+> --i-taxonomy ../02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --o-collapsed-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L4.qza \
+> --p-level 4
+
+# filter low prevalent level 4 taxa
+
+qiime feature-table filter-features \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L4.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L4_filtfeat.qza
+
+# add pseudo count 
+
+qiime composition add-pseudocount \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L4_filtfeat.qza \
+> --o-composition-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L4_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L4_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_18S_L4_season.qzv
+
+
+### ANCOM at level 5
+
+# collapse table to level 5
+
+qiime taxa collapse \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza \
+> --i-taxonomy ../02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --o-collapsed-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L5.qza \
+> --p-level 5
+
+# filter low prevalent level 5 taxa
+
+qiime feature-table filter-features \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L5.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L5_filtfeat.qza
+
+# add pseudo count 
+
+qiime composition add-pseudocount \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L5_filtfeat.qza \
+> --o-composition-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L5_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L5_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_18S_L5_season.qzv
+
+
+### ANCOM at level 6
+
+# collapse table to level 6
+
+qiime taxa collapse \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza \
+> --i-taxonomy ../02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --o-collapsed-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L6.qza \
+> --p-level 6
+
+# filter low prevalent level 6 taxa
+
+qiime feature-table filter-features \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L6.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L6_filtfeat.qza
+
+# add pseudo count 
+
+qiime composition add-pseudocount \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L6_filtfeat.qza \
+> --o-composition-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L6_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L6_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_18S_L6_season.qzv
+
+### ANCOM at level 8
+
+# collapse table to level 8
+
+qiime taxa collapse \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom.qza \
+> --i-taxonomy ../02_taxonomy/18S_plate52_ribonly_full-taxonomy.qza \
+> --o-collapsed-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L8.qza \
+> --p-level 8
+
+# filter low prevalent level 8 taxa
+
+qiime feature-table filter-features \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L8.qza \
+> --p-min-frequency 50 \
+> --p-min-samples 4 \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L8_filtfeat.qza
+
+# add pseudo count 
+
+qiime composition add-pseudocount \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L8_filtfeat.qza \
+> --o-composition-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L8_filtfeat_comp.qza
+
+# ancom between seasons
+
+qiime composition ancom \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_214940min_ancom_L8_filtfeat_comp.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --m-metadata-column season \
+> --o-visualization ancom_18S_L8_season.qzv
+
+############################################################
+# Heather Deel
+# December 4th, 2020
+# # Quick filtering of non-rarefied feature table
+# Include all samples and only true negative controls (CSU extractions) 
+# Not blanks spots on the 96-well
+# Solely for reporting purposes
+##########################################################################
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis/03_feature_tables 
+
+source activate qiime2-2020.6
+
+# filter original, raw feature table
+
+qiime feature-table filter-samples \
+> --i-table 18S_plate52_ribonly_table.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --p-where "[sample_blanks_include]='y'" \
+> --o-filtered-table 18S_plate52_ribonly_table_ribs_negextractions_only.qza
+
+qiime feature-table summarize \
+> --i-table 18S_plate52_ribonly_table_ribs_negextractions_only.qza \
+> --o-visualization 18S_plate52_ribonly_table_ribs_negextractions_only.qzv
+
+# now do taxa filtered-table
+
+qiime feature-table filter-samples \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered.qza \
+> --m-metadata-file ../../02_metadata/map_18S.txt \
+> --p-where "[sample_blanks_include]='y'" \
+> --o-filtered-table 18S_plate52_ribonly_table_full_taxfiltered_ribs_negextractions_only.qza
+
+qiime feature-table summarize \
+> --i-table 18S_plate52_ribonly_table_full_taxfiltered_ribs_negextractions_only.qza \
+> --o-visualization 18S_plate52_ribonly_table_full_taxfiltered_ribs_negextractions_only.qzv
+
+############################################################
+# Heather Deel
+# December 4th, 2020
+# Using core-features in qiime2 to identify a core microbial eukaryotic community
+##########################################################################
+
+# use default parameters with a 50% sample threshold
+
+# use rarefied table with both seasons
+
+cd /Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis/05_core_metrics/core-features 
+
+qiime feature-table core-features \
+> --i-table ../../03_feature_tables/18S_plate52_ribonly_table_full_taxfiltered_214940.qza \
+> --o-visualization 18S_plate52_ribonly_full_taxfiltered_214940_core-features.qzv
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
