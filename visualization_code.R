@@ -30,9 +30,9 @@ library(plyr)
 library(rstatix)
 library(rlang)
 
-### Figure 1 ###
+### Figure 1A and 1B ###
 
-# 16S linear mixed effects
+# 16S linear mixed effects - 1A
 
 setwd("/Users/alex/Dropbox/PMI_3_analyses/bone/01_16S/07_longitudinal/72f27eb0-57fb-42ee-a20f-68912e6e2064/data")
 
@@ -93,7 +93,7 @@ A + stat_cor(method = "pearson")
 
 ggsave("Faithpd16S.png", height=5, width=5, device="png", dpi=500)
 
-# 18S linear  mixed effects
+# 18S linear  mixed effects - 1B
 
 faithdata3<-read.delim("/Users/alex/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis/05_core_metrics/core-metrics-results_hostID/longitudinal/39bc961c-e5f6-443d-a217-b656136174c7/data/raw-data.tsv",header=TRUE,sep="\t")
 
@@ -173,7 +173,6 @@ tax<-tax_table(tax)
 #remake physeq to include taxonomy
 physeq_16S<-merge_phyloseq(physeq_16S,tax)
 
-
 #combine at genus level and transform abundance to relative abundance
 physeq_16S_genus <-physeq_16S %>%
   tax_glom(taxrank = "Genus") %>%                     # agglomerate at level of interest
@@ -194,18 +193,31 @@ genus_16S_Avg <- physeq_16S_genus %>%
   dplyr::arrange(season,sample_simple,ADD_0) %>%
   unite(Taxa, c(Phylum, Class, Order, Family, Genus), sep = ",", remove = FALSE)
 
-#assign to rare taxa
+#assign rare taxa by sample
+#genus_16S_Avg$Phylum[genus_16S_Avg$avg.rel.abund <0.05] <- as.character("RareTaxa") #rename a genus to rare taxa if relative abundance is less than 0.01
+#genus_16S_Avg$Taxa[genus_16S_Avg$avg.rel.abund <0.05] <- as.character("RareTaxa") #rename a genus to rare taxa if relative abundance is less than 0.01
+
+#assign to rare taxa alternative
 genus_16S_Avg$Phylum[genus_16S_Avg$OTU %in% ftax.names] <- as.character("RareTaxa")
 genus_16S_Avg$Taxa[genus_16S_Avg$OTU %in% ftax.names] <- as.character("RareTaxa")
 
+#check for names of palettes to choose; see what for loops below require
+#hcl.pals()
+#display.brewer.all() 
+#colors()
+
 #make palette; need colors to equal phylum levels 
-levels(as.factor(genus_16S_Avg$Phylum)) #seven levels 
+levels(as.factor(genus_16S_Avg$Phylum)) #six levels 
+
+#use one or the other; first for rcolorbrewer palette and second for other loops
+#palette <- c("Reds","Greens","Purples","YlOrBr","Blues","Grays")
+#palette<-c("red","green","yellow","purple","blue","grey")
 
 # use below palette for sequential colors
-palette<-c("red","green","yellow","pink","blue","orange", "monochrome")
+palette<-c("red","green","yellow","pink","blue", "monochrome")
 
 #to load in a saved palette
-palette <- readRDS(file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/04_results_other/taxa_plots/palette.rds")
+#palette <- readRDS(file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/04_results_other/taxa_plots/palette.rds")
 
 #use these same colors for the same taxa; build a palette
 myColors1 <- palette
@@ -224,6 +236,32 @@ p<-genus_16S_Avg %>% select_all() %>% group_by(Phylum,Phy_Colors)  %>%
 #gets unique colors for each phylum and save to object called phylum
 phylum<-c()
 
+################
+#for loops; pick one but make sure you are using an appropriate palette
+#################
+#just give this color names from colors(); transitions to brown, which is annoying
+for(i in 1:nrow(p)) {
+  print(p$Phylum[i])
+  a<-scales::seq_gradient_pal(p$Phy_Colors[i])(seq(0,1,length.out=(p$n_colors[i])))
+  phylum<-c(phylum,a)
+}
+
+#to be used with colors from hcl.pals()
+for(i in 1:nrow(p)) {
+  print(p$Phylum[i])
+  a<-hcl.colors(n=(p$n_colors[i]+1),palette=p$Phy_Colors[i], alpha=1,rev=FALSE)[-(p$n_colors[i]+1)] 
+  phylum<-c(phylum,a)
+}
+
+#to be used with colors from display.brewer.all() 
+for(i in 1:nrow(p)) {
+  print(p$Phylum[i])
+  a<-colorRampPalette(brewer.pal(8, p$Phy_Colors[i])[3:8],bias=0.75,interpolate="linear")(p$n_colors[i]) 
+  phylum<-c(phylum,a)
+}
+
+#if more random colors rather than sequential
+library(randomcoloR) 
 for(i in 1:nrow(p)) {
   print(p$Phylum[i])
   a<-randomColor(count = p$n_colors[i], hue = p$Phy_Colors[i], luminosity = "bright")
@@ -241,27 +279,33 @@ names(phylum)<-gen_colors$u_genera
 #need to reorder factor levels for the Taxa column so we get a nice gradient
 genus_16S_Avg$Taxa<- factor(genus_16S_Avg$Taxa, levels = gen_colors$u_genera)
 
+# adding ADD to the x axis
+df<-data.frame(sample_data(physeq_16S))
+df$ADD_name<-as.character(df$ADD_0)
+df1<-df %>% arrange(ADD_0) #arrange using ADD
+df1$ADD_name<-fct_reorder(df1$ADD_name,df1$ADD_0) #reorder factor levels
+
 #plot
-ggplot(data=genus_16S_Avg, aes(x = reorder(sample_simple, ADD_0), y = avg.rel.abund)) + 
+ggplot(data=genus_16S_Avg, aes(x = fct_reorder(sample_simple,ADD_0), y = avg.rel.abund)) + 
   geom_bar(aes(fill=Taxa),stat = "identity",color="black") +
   facet_grid(~season, scales = 'free', space = "free") +
+  scale_x_discrete(labels=df1$ADD_name, breaks=df1$sample_simple) +
   scale_fill_manual(values= phylum) +
   theme_classic()+
   theme(axis.title.x = element_text(size=8)) + 
+  theme(axis.text.x = element_text(size = 5)) +
   xlab("Accumulated Degree days (ADD)")+
   guides(fill = guide_legend(keywidth = 1, keyheight = 1, nrow=13)) +
   ylab("Average Relative Abundance") +
-  theme(axis.text.x = element_blank(), 
-        strip.text.x = element_text(face="bold", vjust=0.5, size=8)) +
   theme(legend.position = "bottom") +
   theme(legend.text=element_text(size=8)) +
   theme(axis.text.y=element_text(size=8),
         axis.title.y= element_text(size=8), legend.title=element_blank(), legend.text =element_text(size=5))+
   guides(fill = guide_legend(keywidth = 0.5, keyheight = 0.5, nrow=21))
 
-ggsave("RelAbundGenus_luminositybright_final.png", units="in", width = 7.5, height = 5.5,  dpi=500, device="png")  
+ggsave("RelAbundGenus_luminositybright_final_ADD.png", units="in", width = 8.5, height = 5.5,  dpi=500, device="png")  
 
-saveRDS(palette, file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/04_results_other/taxa_plots/palette.rds")
+#saveRDS(palette, file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/04_results_other/taxa_plots/palette.rds")
 
 ### Figure 2B ###
 
@@ -307,6 +351,7 @@ ftax.names<-taxa_names(ftax)
 #melt the physeq table
 physeq_18S_L8<-physeq_18S_L8 %>% psmelt()
 
+
 #Average relative abundance by category; obviously you don't have to get a mean relative abundance 
 physeq_18S_L8_Avg <- physeq_18S_L8 %>%
   group_by(season,ADD_0,sample_simple,L2,L3,L4,L5,L6,L7,OTU) %>%
@@ -314,16 +359,30 @@ physeq_18S_L8_Avg <- physeq_18S_L8 %>%
   dplyr::arrange(season,sample_simple,ADD_0) %>%
   unite(Taxa, c(L2, L3, L4, L5, L6, L7), sep = ",", remove = FALSE)
 
-#assign to rare taxa
+#assign to rare taxa alternative
 physeq_18S_L8_Avg$L2[physeq_18S_L8_Avg$OTU %in% ftax.names] <- as.character("RareTaxa")
 physeq_18S_L8_Avg$Taxa[physeq_18S_L8_Avg$OTU %in% ftax.names] <- as.character("RareTaxa")
+
+### now working with color palettes
+#check for names of palettes to choose; see what for loops below require
+hcl.pals()
+display.brewer.all() 
+colors()
 
 #make palette; need colors to equal L2 levels 
 levels(as.factor(physeq_18S_L8_Avg$L2)) #7 levels 
 physeq_18S_L8_Avg$L2<-fct_relevel(physeq_18S_L8_Avg$L2, "RareTaxa", after=6)
 
+
+#use one or the other; first for rcolorbrewer palette and second for other loops
+#palette <- c("Reds","Greens","Purples","YlOrBr","Blues","Grays")
+#palette<-c("Reds","Greens","Purples","YlOrBr","Blues","Grays")
+
 # use below palette for sequential colors
 palette<-c("red","green","yellow","blue","purple", "monochrome", "monochrome")
+
+#to load in a saved palette
+#palette <- readRDS(file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/04_results_other/taxonomy/palette.rds")
 
 #use these same colors for the same taxa; build a palette
 myColors1 <- palette
@@ -341,6 +400,30 @@ p<-physeq_18S_L8_Avg %>% select_all() %>% group_by(L2,L2_Colors)  %>%
 
 #gets unique colors for each L2 and save to object called L2
 level2 <- c()
+
+################
+#for loops; pick one but make sure you are using an appropriate palette
+#################
+#just give this color names from colors(); transitions to brown, which is annoying
+for(i in 1:nrow(p)) {
+  print(p$L2[i])
+  a<-scales::seq_gradient_pal(p$L2_Colors[i])(seq(0,1,length.out=(p$n_colors[i])))
+  level2<-c(level2,a)
+}
+
+#to be used with colors from hcl.pals()
+for(i in 1:nrow(p)) {
+  print(p$L2[i])
+  a<-hcl.colors(n=(p$n_colors[i]+1),palette=p$L2_Colors[i], alpha=1,rev=FALSE)[-(p$n_colors[i]+1)] 
+  level2<-c(level2,a)
+}
+
+#to be used with colors from display.brewer.all() 
+for(i in 1:nrow(p)) {
+  print(p$L2[i])
+  a<-colorRampPalette(brewer.pal(8, p$L2_Colors[i])[3:8],bias=0.75,interpolate="linear")(p$n_colors[i]) 
+  level2<-c(level2,a)
+}
 
 #if more random colors rather than sequential
 for(i in 1:nrow(p)) {
@@ -360,30 +443,40 @@ names(level2)<-gen_colors$u_genera
 #need to reorder factor levels for the Taxa column so we get a nice gradient
 physeq_18S_L8_Avg$Taxa<- factor(physeq_18S_L8_Avg$Taxa, levels = gen_colors$u_genera)
 
+# adding ADD to the x axis
+df<-data.frame(sample_data(physeq_18S))
+df$ADD_name<-as.character(df$ADD_0)
+df1<-df %>% arrange(ADD_0) #arrange using ADD
+df1$ADD_name<-fct_reorder(df1$ADD_name,df1$ADD_0) #reorder factor levels
+
 #plot
-ggplot(data=physeq_18S_L8_Avg, aes(x = reorder(sample_simple, ADD_0), y = avg.rel.abund)) + 
+ggplot(data=physeq_18S_L8_Avg, aes(x = fct_reorder(sample_simple,ADD_0), y = avg.rel.abund)) + 
   geom_bar(aes(fill=Taxa),stat = "identity",color="black") +
   facet_grid(~season, scales = 'free', space = "free") +
+  scale_x_discrete(labels=df1$ADD_name, breaks=df1$sample_simple) +
   scale_fill_manual(values= level2) +
   theme_classic()+
+  #scale_y_continuous(limits=c(0,1.25))+
+  # Remove x axis title
   theme(axis.title.x = element_text(size=8)) + 
+  theme(axis.text.x = element_text(size = 5)) +
   xlab("Accumulated Degree days (ADD)")+
   guides(fill = guide_legend(keywidth = 1, keyheight = 1, nrow=13)) +
   ylab("Average Relative Abundance") +
-  theme(axis.text.x = element_blank(), 
-        strip.text.x = element_text(face="bold", vjust=0.5, size=8)) +
+  #theme(axis.text.x = element_blank(), 
+  #      strip.text.x = element_text(face="bold", vjust=0.5, size=8)) +
   theme(legend.position = "bottom") +
   theme(legend.text=element_text(size=8)) +
   theme(axis.text.y=element_text(size=8),
         axis.title.y= element_text(size=8), legend.title=element_blank(), legend.text =element_text(size=5))+
   guides(fill = guide_legend(keywidth = 0.5, keyheight = 0.5, nrow=21))
 
-ggsave("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/04_results_other/taxonomy/RelAbund_luminositybright_final.png", units="in", width = 7.5, height = 5.5,  dpi=500, device="png")  
+ggsave("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/04_results_other/taxonomy/RelAbund_luminositybright_final_ADD.png", units="in", width = 8.5, height = 5.5,  dpi=500, device="png")  
 
-saveRDS(palette, file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/04_results_other/taxonomy/palette.rds")
+#saveRDS(palette, file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/04_results_other/taxonomy/palette.rds")
 
 ### Figure 3A and 3B ###
-# spring alone
+# spring alone - 3A
 # import metadata and weighted unifrac qza files
 metadata <- read_csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs_R.csv")
 metadata
@@ -425,7 +518,7 @@ pcoa_weighted_spring$data$Vectors %>%
                      values=c("red","deepskyblue1", "deepskyblue4", "gold", "lightsalmon4")) +
   labs(title = "Spring")
 
-# summer alone
+# summer alone - 3B
 # import metadata and weighted unifrac qza files
 metadata <- read_csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs_R.csv")
 metadata
@@ -467,8 +560,78 @@ pcoa_weighted_summer$data$Vectors %>%
                      values=c("red","deepskyblue1", "deepskyblue4", "gold", "lightsalmon4")) +
   labs(title = "Summer")
 
-### Figure 4 ###
-# both seasons
+### Figure 3C and 3D ###
+
+# spring - 3C
+detach("package:ggpubr", unload = TRUE)
+detach("package:dplyr", unload = TRUE)
+st_spring <- read.csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/STout_day1_2_19_20_21_spring/mixing_proportions_R_spring.csv")
+st_spring <- ddply(melt(st_spring, id.vars = 'SampleTimePoint'), .(SampleTimePoint))
+
+library(dplyr)   ### LOAD THIS HERE, NOT ABOVE
+st_long_prop_spring <- st_spring %>% group_by(SampleTimePoint,variable) %>% summarise(Source_proportion = mean(value))
+
+black.bold.text = element_text(face = "bold", color = "black")
+black.text = element_text(color = "black")
+
+ggplot(st_long_prop_spring, aes(x = SampleTimePoint, y = Source_proportion, fill = variable)) + 
+  geom_bar(stat = 'identity') +
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'white', colour = 'white'), 
+        axis.text.x = element_text(color = "black", angle = 90, hjust = 0.5, vjust = 0.5), 
+        axis.text.y = element_text(color = "black", angle = 0, hjust = 0.5, vjust = 0.5),
+        axis.title.x = element_text(color = "black"),
+        axis.title.y = element_text(color = "black"),
+        plot.title = element_text(hjust = 0.5, color = "black", size = 18),
+        title = black.bold.text, axis.title = black.bold.text,
+        legend.title.align = 0, 
+        plot.background = element_rect(fill='white'),
+        legend.text=element_text(size=20, color = "black"),
+        legend.title =element_text(size=20, color = "black"),
+        legend.background = element_rect(fill = "white")) +
+  theme(axis.text.x = element_text(angle = 0)) +
+  scale_x_discrete(limits=c("708", "1301", "1911", "2584", "3305", "3777", "4285", "4821")) +
+  scale_fill_manual(values = c("deepskyblue1", "deepskyblue4", "yellow", "lightsalmon4", "grey3"),
+                    name = "Source", labels = c("Fresh Skin", "Advanced Skin", "Fresh Soil", "Advanced Soil", "Unknown")) +
+  labs(title = "Spring", x = "Sampling Time Point Average ADD", y = "Source Proportion")
+
+
+# summer - 3D
+detach("package:ggpubr", unload = TRUE)
+detach("package:dplyr", unload = TRUE)
+st_summer <- read.csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/STout_day1_2_19_20_21_summer/mixing_proportions_R_summer.csv")
+st_summer <- ddply(melt(st_summer, id.vars = 'SampleTimePoint'), .(SampleTimePoint))
+
+library(dplyr)   ### LOAD THIS HERE, NOT ABOVE
+st_long_prop_summer <- st_summer %>% group_by(SampleTimePoint,variable) %>% summarise(Source_proportion = mean(value))
+
+black.bold.text = element_text(face = "bold", color = "black")
+black.text = element_text(color = "black")
+
+ggplot(st_long_prop_summer, aes(x = SampleTimePoint, y = Source_proportion, fill = variable)) + 
+  geom_bar(stat = 'identity') +
+  theme(panel.grid.major = element_blank(),
+        panel.background = element_rect(fill = 'white', colour = 'white'), 
+        axis.text.x = element_text(color = "black", angle = 90, hjust = 0.5, vjust = 0.5), 
+        axis.text.y = element_text(color = "black", angle = 0, hjust = 0.5, vjust = 0.5),
+        axis.title.x = element_text(color = "black"),
+        axis.title.y = element_text(color = "black"),
+        plot.title = element_text(hjust = 0.5, color = "black", size = 18),
+        title = black.bold.text, axis.title = black.bold.text,
+        legend.title.align = 0, 
+        plot.background = element_rect(fill='white'),
+        legend.text=element_text(size=20, color = "black"),
+        legend.title =element_text(size=20, color = "black"),
+        legend.background = element_rect(fill = "white")) +
+  theme(axis.text.x = element_text(angle = 0)) +
+  scale_x_discrete(limits=c("874", "1415", "1983", "2341", "2892", "3512", "4131", "4905")) +
+  scale_fill_manual(values = c("deepskyblue1", "deepskyblue4", "yellow", "lightsalmon4", "grey3"),
+                    name = "Source", labels = c("Fresh Skin", "Advanced Skin", "Fresh Soil", "Advanced Soil", "Unknown")) +
+  labs(title = "Summer", x = "Sampling Time Point Average ADD", y = "Source Proportion")
+
+
+### Figure 4A and 4B ###
+# 4A
 # import metadata and unweighted unifrac qza files
 metadata <- read_tsv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/02_metadata/maps/map3.txt")
 metadata
@@ -500,53 +663,68 @@ pcoa$data$Vectors %>%
   scale_color_manual(values=c("deepskyblue","tomato")) +
   ggtitle("Spring and Summer")
 
-### spring
+#4B
 
-# import qza
-pcoa_spring <- read_qza("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/01_qiime2_analysis/core-metrics/core-metrics-frag-ins-spring/unweighted_unifrac_pcoa_results.qza")
+### 16S
+# decided to use weighted unifrac, has clear trends
+setwd("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/07_longitudinal/LME_distance_season_weUnif/data")
 
-# plot unweighted unifrac pcoa
-pcoa_spring$data$Vectors %>%
-  rename("#SampleID"=SampleID) %>%
-  left_join(metadata) %>%
-  ggplot(aes(x=PC1, y=PC2, size=ADD)) +
-  geom_point(color = "deepskyblue") +
-  xlab(paste("PC1: ", round(100*pcoa_spring$data$ProportionExplained[1]), "%")) +
-  ylab(paste("PC2: ", round(100*pcoa_spring$data$ProportionExplained[2]), "%")) +
-  theme_classic() +
-  theme(axis.text=element_text(size=14),
-        axis.text.x=element_text(size=14),
-        axis.text.y=element_text(size=14),
-        axis.title=element_text(size=20, face="bold"),
-        legend.text=element_text(size=20),
-        legend.title =element_text(size=20),
-        plot.title=element_text(size=20)) +
-  ggtitle("Spring")
+weUnif_data<-read.delim("raw-data.tsv",header=TRUE,sep="\t")
 
-### summer
+# saw no obvious outliers to remove
 
-# import qza
-pcoa_summer <- read_qza("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/01_qiime2_analysis/core-metrics/core-metrics-frag-ins-summer/unweighted_unifrac_pcoa_results.qza")
+#look at linearity
+ggplot(weUnif_data,aes(Distance,residual,color=season))+
+  geom_point()
 
-# plot unweighted unifrac pcoa
-pcoa_summer$data$Vectors %>%
-  rename("#SampleID"=SampleID) %>%
-  left_join(metadata) %>%
-  ggplot(aes(x=PC1, y=PC2, size=ADD)) +
-  geom_point(color = "tomato") +
-  xlab(paste("PC1: ", round(100*pcoa_summer$data$ProportionExplained[1]), "%")) +
-  ylab(paste("PC2: ", round(100*pcoa_summer$data$ProportionExplained[2]), "%")) +
-  theme_classic() +
-  theme(axis.text=element_text(size=14),
-        axis.text.x=element_text(size=14),
-        axis.text.y=element_text(size=14),
-        axis.title=element_text(size=20, face="bold"),
-        legend.text=element_text(size=20),
-        legend.title =element_text(size=20),
-        plot.title=element_text(size=20)) +
-  ggtitle("Summer")
+#homogeneity of variance
+weUnif_data$residualsquare <- weUnif_data$residual^2 #squares the absolute values of the residuals to provide the more robust estimate
+Levene.Model <- lm(residualsquare ~ host_subject_id , data=weUnif_data) #ANOVA of the squared residuals
+anova(Levene.Model) #p-value is 0.1688; residuals have equal variance across subjects
 
-### Figure S2A ###
+#model with random effects and random intercepts
+Model.F<-lmer(Distance ~ ADD_0*season
+              + (1+ADD_0|host_subject_id),
+              data=weUnif_data, REML=TRUE)
+#model with random intercepts
+Model.F2<-lmer(Distance ~ ADD_0*season
+               + (1|host_subject_id), 
+               data=weUnif_data, REML=TRUE)
+# note - above models came with warning message:
+# Warning message:
+# Some predictor variables are on very different scales: consider rescaling 
+library(lmtest)
+lrtest(Model.F,Model.F2)
+
+Plot.Model.F <- plot(Model.F)
+
+
+#normality
+require("lattice")
+qqmath(Model.F, id=0.05)
+
+
+#plot
+library(ggpubr)
+A<-ggscatter(weUnif_data, x = "ADD_0", y = "Distance",
+             add = "reg.line",                         # Add regression line
+             conf.int = TRUE,                          # Add confidence interval
+             color = "season", palette = "jco",           # Color by groups "cyl"
+             shape = "season"                             # Change point shape by groups "cyl"
+)+
+  xlab("Accumulated Degree Day")+
+  ylab("Distance")+
+  theme(axis.text.x=element_text(angle = 90, vjust=0.5, hjust = 1))+
+  scale_y_continuous(breaks=c(0.2,0.4,0.6,0.8,1),limits=c(0,1))
+
+A
+
+# add correlation coefficient and p-value to plot
+A + stat_cor(method = "pearson")
+
+ggsave("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/07_longitudinal/weUni_distance.png", height=5, width=5, device="png", dpi=500)
+
+### Figure S1A ###
 
 #make a phyloseq object
 physeq_16S_neg<-qza_to_phyloseq(
@@ -662,7 +840,7 @@ ggsave("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/04_results_other/t
 
 saveRDS(palette_neg, file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/04_results_other/taxa_plots/palette_neg.rds")
 
-### Figure S2B ###
+### Figure S1B ###
 
 #make initial phyloseq object
 physeq_18S_neg_initial<-qza_to_phyloseq(
@@ -783,9 +961,9 @@ ggsave("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run
 
 saveRDS(palette_neg, file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/04_results_other/taxonomy/palette_neg.rds")
 
-### Figure S3 ###
+### Figure S2A and S2B ###
 
-# spring
+# spring - S2A
 
 ST_shannon_spring <- read.csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/ST_graphing_files/shannon_R_spring.csv")
 
@@ -809,10 +987,10 @@ stat.test_spring
 ggboxplot(ST_shannon_spring, x = "sample_type_timepoint", y = "shannon_entropy", color = "sample_type_timepoint") +
   stat_pvalue_manual(stat.test_spring, label = "{p.adj}{p.adj.signif}", tip.length = 0, hide.ns = TRUE) +
   scale_x_discrete(labels = c("rib" = "Rib", 
-                              "skin_early" = "Fresh Skin",
-                              "skin_late" = "Advanced Skin",
-                              "soil_early" = "Fresh Soil",
-                              "soil_late" = "Advanced Soil")) +
+                              "skin_early" = "Early Skin",
+                              "skin_late" = "Decomposer Skin",
+                              "soil_early" = "Early Soil",
+                              "soil_late" = "Decomposer Soil")) +
   scale_color_manual(values=c("red","deepskyblue1", "deepskyblue4", "gold", "lightsalmon4")) +
   labs(x="Sample Type", y="Shannon", title = "Spring") +
   theme(legend.position = "none",
@@ -821,7 +999,7 @@ ggboxplot(ST_shannon_spring, x = "sample_type_timepoint", y = "shannon_entropy",
         axis.text.x=element_text(size=14, color = "black"),
         axis.text.y=element_text(size=14, color = "black"))
 
-# summer
+# summer - S2B
 
 ST_shannon_summer <- read.csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/ST_graphing_files/shannon_R_summer.csv")
 
@@ -840,10 +1018,10 @@ stat.test_summer
 ggboxplot(ST_shannon_summer, x = "sample_type_timepoint", y = "shannon_entropy", color = "sample_type_timepoint") +
   stat_pvalue_manual(stat.test_summer, label = "{p.adj}{p.adj.signif}", tip.length = 0, hide.ns = TRUE) +
   scale_x_discrete(labels = c("rib" = "Rib", 
-                              "skin_early" = "Fresh Skin",
-                              "skin_late" = "Advanced Skin",
-                              "soil_early" = "Fresh Soil",
-                              "soil_late" = "Advanced Soil")) +
+                              "skin_early" = "Early Skin",
+                              "skin_late" = "Decomposer Skin",
+                              "soil_early" = "Early Soil",
+                              "soil_late" = "Decomposer Soil")) +
   scale_color_manual(values=c("red","deepskyblue1", "deepskyblue4", "gold", "lightsalmon4")) +
   labs(x="Sample Type", y="Shannon", title = "Summer") +
   theme(legend.position = "none",
@@ -852,7 +1030,93 @@ ggboxplot(ST_shannon_summer, x = "sample_type_timepoint", y = "shannon_entropy",
         axis.text.x=element_text(size=14, color = "black"),
         axis.text.y=element_text(size=14, color = "black"))
 
-### Figure S4A ###
+### Figure S2C and S2D
+
+# spring alone - S2C
+# import metadata and weighted unifrac qza files
+metadata <- read_csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs_R.csv")
+metadata
+
+pcoa_unweighted_spring <- read_qza("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/core_metrics/core-metrics-STsamplesonly-spring-4548/unweighted_unifrac_pcoa_results.qza")
+
+# just looking at stuff 
+pcoa_unweighted_spring$uuid
+head(pcoa_unweighted_spring$data$ProportionExplained)
+pcoa_unweighted_spring$data$Vectors[1:5, 1:3]
+
+black.bold.text = element_text(face = "bold", color = "black")
+black.text = element_text(color = "black")
+
+### plot unweighted unifrac
+pcoa_unweighted_spring$data$Vectors %>%
+  #rename("#SampleID"=SampleID) %>%
+  left_join(metadata) %>%
+  ggplot(aes(x=PC1, y=PC2, color = sample_type_timepoint)) +
+  geom_point(size = 2.5) +
+  xlab(paste("PC1: ", round(100*pcoa_unweighted_spring$data$ProportionExplained[1]), "%")) +
+  ylab(paste("PC2: ", round(100*pcoa_unweighted_spring$data$ProportionExplained[2]), "%")) +
+  theme_classic() +
+  theme(axis.text=element_text(size=14),
+        axis.text.x=element_text(size=14, color = "black"),
+        axis.text.y=element_text(size=14, color = "black"),
+        #axis.title=element_text(size=20, face="bold", color = "black"),
+        axis.line.x = element_line(color = "black"),
+        axis.line.y = element_line(color = "black"),
+        plot.title=element_text(size=20, color = "black"),
+        title = black.bold.text, axis.title = black.bold.text,
+        panel.background = element_rect(fill = "white", color = "white"),
+        plot.background = element_rect(fill = "white"),
+        legend.text=element_text(size=20, color = "black"),
+        legend.title =element_text(size=20, color = "black"),
+        legend.background = element_rect(fill = "white")) +
+  scale_color_manual(name = "Sample Type",
+                     labels = c("Rib", "Early Skin", "Decomposer Skin", "Early Soil", "Decomposer Soil"),
+                     values=c("red","deepskyblue1", "deepskyblue4", "gold", "lightsalmon4")) +
+  labs(title = "Spring")
+
+# summer alone - S2D
+# import metadata and weighted unifrac qza files
+metadata <- read_csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs_R.csv")
+metadata
+
+pcoa_unweighted_summer <- read_qza("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/core_metrics/core-metrics-STsamplesonly-summer-4548/unweighted_unifrac_pcoa_results.qza")
+
+# just looking at stuff 
+pcoa_unweighted_summer$uuid
+head(pcoa_unweighted_summer$data$ProportionExplained)
+pcoa_unweighted_summer$data$Vectors[1:5, 1:3]
+
+black.bold.text = element_text(face = "bold", color = "black")
+black.text = element_text(color = "black")
+
+### plot weighted unifrac
+pcoa_unweighted_summer$data$Vectors %>%
+  #rename("#SampleID"=SampleID) %>%
+  left_join(metadata) %>%
+  ggplot(aes(x=PC1, y=PC2, color = sample_type_timepoint)) +
+  geom_point(size = 2.5) +
+  xlab(paste("PC1: ", round(100*pcoa_unweighted_summer$data$ProportionExplained[1]), "%")) +
+  ylab(paste("PC2: ", round(100*pcoa_unweighted_summer$data$ProportionExplained[2]), "%")) +
+  theme_classic() +
+  theme(axis.text=element_text(size=14),
+        axis.text.x=element_text(size=14, color = "black"),
+        axis.text.y=element_text(size=14, color = "black"),
+        #axis.title=element_text(size=20, face="bold", color = "black"),
+        axis.line.x = element_line(color = "black"),
+        axis.line.y = element_line(color = "black"),
+        plot.title=element_text(size=20, color = "black"),
+        title = black.bold.text, axis.title = black.bold.text,
+        panel.background = element_rect(fill = "white", color = "white"),
+        plot.background = element_rect(fill = "white"),
+        legend.text=element_text(size=20, color = "black"),
+        legend.title =element_text(size=20, color = "black"),
+        legend.background = element_rect(fill = "white")) +
+  scale_color_manual(name = "Sample Type",
+                     labels = c("Rib", "Early Skin", "Decomposer Skin", "Early Soil", "Decomposer Soil"),
+                     values=c("red","deepskyblue1", "deepskyblue4", "gold", "lightsalmon4")) +
+  labs(title = "Summer")
+
+### Figure S3A ###
 
 # spring, skin and soil
 #make a phyloseq object
@@ -981,7 +1245,7 @@ ggsave("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/S
 
 saveRDS(palette, file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/04_results_other/taxa_plots/palette.rds")
 
-### Figure S4B ###
+### Figure S3B ###
 
 # summer, skin and soil
 #make a phyloseq object
@@ -1108,92 +1372,7 @@ ggsave("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/S
 
 saveRDS(palette, file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/04_results_other/taxa_plots/palette.rds")
 
-### Figure S5 ###
-# spring alone
-# import metadata and weighted unifrac qza files
-metadata <- read_csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs_R.csv")
-metadata
-
-pcoa_unweighted_spring <- read_qza("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/core_metrics/core-metrics-STsamplesonly-spring-4548/unweighted_unifrac_pcoa_results.qza")
-
-# just looking at stuff 
-pcoa_unweighted_spring$uuid
-head(pcoa_unweighted_spring$data$ProportionExplained)
-pcoa_unweighted_spring$data$Vectors[1:5, 1:3]
-
-black.bold.text = element_text(face = "bold", color = "black")
-black.text = element_text(color = "black")
-
-### plot unweighted unifrac
-pcoa_unweighted_spring$data$Vectors %>%
-  #rename("#SampleID"=SampleID) %>%
-  left_join(metadata) %>%
-  ggplot(aes(x=PC1, y=PC2, color = sample_type_timepoint)) +
-  geom_point(size = 2.5) +
-  xlab(paste("PC1: ", round(100*pcoa_unweighted_spring$data$ProportionExplained[1]), "%")) +
-  ylab(paste("PC2: ", round(100*pcoa_unweighted_spring$data$ProportionExplained[2]), "%")) +
-  theme_classic() +
-  theme(axis.text=element_text(size=14),
-        axis.text.x=element_text(size=14, color = "black"),
-        axis.text.y=element_text(size=14, color = "black"),
-        #axis.title=element_text(size=20, face="bold", color = "black"),
-        axis.line.x = element_line(color = "black"),
-        axis.line.y = element_line(color = "black"),
-        plot.title=element_text(size=20, color = "black"),
-        title = black.bold.text, axis.title = black.bold.text,
-        panel.background = element_rect(fill = "white", color = "white"),
-        plot.background = element_rect(fill = "white"),
-        legend.text=element_text(size=20, color = "black"),
-        legend.title =element_text(size=20, color = "black"),
-        legend.background = element_rect(fill = "white")) +
-  scale_color_manual(name = "Sample Type",
-                     labels = c("Rib", "Fresh Skin", "Advanced Skin", "Fresh Soil", "Advanced Soil"),
-                     values=c("red","deepskyblue1", "deepskyblue4", "gold", "lightsalmon4")) +
-  labs(title = "Spring")
-
-# summer alone
-# import metadata and weighted unifrac qza files
-metadata <- read_csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/mapping_files/map_bone_SHSU_skin_soil_spring_summer_allQIITAIDs_R.csv")
-metadata
-
-pcoa_unweighted_summer <- read_qza("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/core_metrics/core-metrics-STsamplesonly-summer-4548/unweighted_unifrac_pcoa_results.qza")
-
-# just looking at stuff 
-pcoa_unweighted_summer$uuid
-head(pcoa_unweighted_summer$data$ProportionExplained)
-pcoa_unweighted_summer$data$Vectors[1:5, 1:3]
-
-black.bold.text = element_text(face = "bold", color = "black")
-black.text = element_text(color = "black")
-
-### plot weighted unifrac
-pcoa_unweighted_summer$data$Vectors %>%
-  #rename("#SampleID"=SampleID) %>%
-  left_join(metadata) %>%
-  ggplot(aes(x=PC1, y=PC2, color = sample_type_timepoint)) +
-  geom_point(size = 2.5) +
-  xlab(paste("PC1: ", round(100*pcoa_unweighted_summer$data$ProportionExplained[1]), "%")) +
-  ylab(paste("PC2: ", round(100*pcoa_unweighted_summer$data$ProportionExplained[2]), "%")) +
-  theme_classic() +
-  theme(axis.text=element_text(size=14),
-        axis.text.x=element_text(size=14, color = "black"),
-        axis.text.y=element_text(size=14, color = "black"),
-        #axis.title=element_text(size=20, face="bold", color = "black"),
-        axis.line.x = element_line(color = "black"),
-        axis.line.y = element_line(color = "black"),
-        plot.title=element_text(size=20, color = "black"),
-        title = black.bold.text, axis.title = black.bold.text,
-        panel.background = element_rect(fill = "white", color = "white"),
-        plot.background = element_rect(fill = "white"),
-        legend.text=element_text(size=20, color = "black"),
-        legend.title =element_text(size=20, color = "black"),
-        legend.background = element_rect(fill = "white")) +
-  scale_color_manual(name = "Sample Type",
-                     labels = c("Rib", "Early Skin", "Decomposer Skin", "Early Soil", "Decomposer Soil"),
-                     values=c("red","deepskyblue1", "deepskyblue4", "gold", "lightsalmon4")) +
-  labs(title = "Summer")
-
-### Figure S6 ###
+### Figure S4A ###
 
 # import metadata and unweighted unifrac qza files
 metadata <- read_tsv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/02_metadata/map_18S.txt")
@@ -1230,7 +1409,67 @@ pcoa$data$Vectors %>%
   scale_color_manual(values=c("deepskyblue","tomato")) +
   ggtitle("18S rRNA Unweighted UniFrac PCoA")
 
-### Figure S8B (Figure S8A made in QIIME2 view and powerpoint) ###
+### Figure S4B ###
+
+# use weighted unifrac, to keep consistent with 16S
+setwd("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis/05_core_metrics/core-metrics-results_hostID/longitudinal/LME_distance_season_weUnif/data")
+
+weUnif_18S_data<-read.delim("raw-data.tsv",header=TRUE,sep="\t")
+
+# saw no obvious outliers to remove
+
+#look at linearity
+ggplot(weUnif_18S_data,aes(Distance,residual,color=season))+
+  geom_point()
+
+#homogeneity of variance
+weUnif_18S_data$residualsquare <- weUnif_18S_data$residual^2 #squares the absolute values of the residuals to provide the more robust estimate
+Levene.Model <- lm(residualsquare ~ host , data=weUnif_18S_data) #ANOVA of the squared residuals
+anova(Levene.Model) #p-value is 0.1413; residuals have equal variance across subjects
+
+#model with random effects and random intercepts
+Model.F<-lmer(Distance ~ ADD*season
+              + (1+ADD|host),
+              data=weUnif_18S_data, REML=TRUE)
+#model with random intercepts
+Model.F2<-lmer(Distance ~ ADD*season
+               + (1|host), 
+               data=weUnif_18S_data, REML=TRUE)
+# note - above models came with warning message:
+# Warning message:
+# Some predictor variables are on very different scales: consider rescaling 
+library(lmtest)
+lrtest(Model.F,Model.F2)
+
+Plot.Model.F <- plot(Model.F)
+
+
+#normality
+require("lattice")
+qqmath(Model.F, id=0.05)
+
+
+#plot 
+library(ggpubr)
+A<-ggscatter(weUnif_18S_data, x = "ADD", y = "Distance",
+             add = "reg.line",                         # Add regression line
+             conf.int = TRUE,                          # Add confidence interval
+             color = "season", palette = "jco",           # Color by groups "cyl"
+             shape = "season"                             # Change point shape by groups "cyl"
+)+
+  xlab("Accumulated Degree Day")+
+  ylab("Distance")+
+  theme(axis.text.x=element_text(angle = 90, vjust=0.5, hjust = 1))+
+  scale_y_continuous(breaks=c(0,0.5,1,1.5,2),limits=c(0,2))
+
+A
+
+# add correlation coefficient and p-value to plot
+A + stat_cor(method = "pearson")
+
+ggsave("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/02_18S/Hiseq_original_run/forward_reads_only/01_qiime2_analysis/05_core_metrics/core-metrics-results_hostID/longitudinal/weUni_distance_18S.png", height=5, width=5, device="png", dpi=500)
+
+### Figure S6B (Figure S5 and S6A made in QIIME2 view and powerpoint) ###
 #make a phyloseq object
 physeq_ST_ctrl<-qza_to_phyloseq(
   features="/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/qiime2_analysis/core_metrics/core-metrics-soilctrlonly-4548/rarefied_table.qza", 
@@ -1346,7 +1585,7 @@ ggsave("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/06_sourcetracker/S
 
 saveRDS(palette, file = "/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/04_results_other/taxa_plots/palette.rds")
 
-### Figure S9 ###
+### Figure S7 ###
 
 #import metadata
 metadata <- read.csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/02_metadata/maps/map3_R.csv", header = TRUE)
@@ -1354,7 +1593,7 @@ metadata <- read.csv("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/02_m
 black.bold.text = element_text(face = "bold", color = "black")
 black.text = element_text(color = "black")
 
-### precipitation graph with both seasons
+### precipitation graph with both seasons - S7A
 precip_plot <- ggplot(data = metadata, aes(x = ADD_0, y = accumulated_precipitation_inches_base0, group = season)) +
   geom_line(aes(linetype=season)) +
   geom_point() +
@@ -1376,7 +1615,7 @@ precip_plot <- ggplot(data = metadata, aes(x = ADD_0, y = accumulated_precipitat
         legend.title = element_text(color = "black", size = 18)) +
   labs(x = "Accumulated Degree Day", y = "Accumulated Precipitation (inches)")
 
-### humidity graph with both seasons
+### humidity graph with both seasons - S7B
 hum_plot <- ggplot(data = metadata, aes(x = ADD_0, y = accumulated_percent_humidity_days_base0, group = season)) +
   geom_line(aes(linetype=season)) +
   geom_point() +
@@ -1404,31 +1643,3 @@ precip_hum_spring_summer <- ggarrange(precip_plot, hum_plot,
                                       labels = c("A", "B"),
                                       ncol = 2)
 precip_hum_spring_summer
-
-### Figure S10 ###
-# import qza
-pcoa_host <- read_qza("/Users/heatherdeel/Dropbox/PMI_3_analyses/bone/01_16S/01_qiime2_analysis/core-metrics/core-metrics-results-frag-ins/weighted_unifrac_pcoa_results.qza")
-
-black.bold.text = element_text(face = "bold", color = "black")
-black.text = element_text(color = "black")
-
-### plot weighted unifrac
-pcoa_host$data$Vectors %>%
-  rename("#SampleID"=SampleID) %>%
-  left_join(metadata) %>%
-  ggplot(aes(x=PC1, y=PC2, color=host_subject_id)) +
-  geom_point(size = 3.5) +
-  xlab(paste("PC1: ", round(100*pcoa_host$data$ProportionExplained[1]), "%")) +
-  ylab(paste("PC2: ", round(100*pcoa_host$data$ProportionExplained[2]), "%")) +
-  theme_classic() +
-  theme(axis.text=element_text(size=14),
-        axis.text.x=element_text(size=14),
-        axis.text.y=element_text(size=14),
-        axis.title=element_text(size=20, face="bold"),
-        legend.text=element_text(size=20),
-        legend.title =element_text(size=20),
-        plot.title=element_text(size=20)) +
-  scale_color_manual(name = "Host Number",
-                     labels = c("007", "011", "024", "064", "065", "067"),
-                     values = c("red","orange1","gold","green","blue","purple")) +
-  ggtitle("16S rRNA Rib Communities by Host")
